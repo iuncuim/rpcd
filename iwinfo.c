@@ -131,7 +131,7 @@ rpc_iwinfo_call_hardware_id(const char *name)
 static void
 rpc_iwinfo_add_encryption(const char *name, struct iwinfo_crypto_entry *e)
 {
-	int ciph, wpa_version;
+	int ciph;
 	void *c, *d;
 
 	c = blobmsg_open_table(&buf, name);
@@ -156,9 +156,15 @@ rpc_iwinfo_add_encryption(const char *name, struct iwinfo_crypto_entry *e)
 		{
 			d = blobmsg_open_array(&buf, "wpa");
 
-			for (wpa_version = 1; wpa_version <= 3; wpa_version++)
-				if (e->wpa_version & (1 << (wpa_version - 1)))
-					blobmsg_add_u32(&buf, NULL, wpa_version);
+			if (e->wpa_version > 2)
+			{
+				blobmsg_add_u32(&buf, NULL, 1);
+				blobmsg_add_u32(&buf, NULL, 2);
+			}
+			else
+			{
+				blobmsg_add_u32(&buf, NULL, e->wpa_version);
+			}
 
 			blobmsg_close_array(&buf, d);
 
@@ -170,12 +176,6 @@ rpc_iwinfo_add_encryption(const char *name, struct iwinfo_crypto_entry *e)
 
 			if (e->auth_suites & IWINFO_KMGMT_8021x)
 				blobmsg_add_string(&buf, NULL, "802.1x");
-
-			if (e->auth_suites & IWINFO_KMGMT_SAE)
-				blobmsg_add_string(&buf, NULL, "sae");
-
-			if (e->auth_suites & IWINFO_KMGMT_OWE)
-				blobmsg_add_string(&buf, NULL, "owe");
 
 			if (!e->auth_suites ||
 				(e->auth_suites & IWINFO_KMGMT_NONE))
@@ -290,48 +290,6 @@ rpc_iwinfo_call_hwmodes(const char *name)
 	}
 }
 
-static void rpc_iwinfo_call_hw_ht_mode()
-{
-	const char *hwmode_str;
-	const char *htmode_str;
-	int32_t htmode = 0;
-
-	if (iw->htmode(ifname, &htmode))
-		return;
-
-	switch (htmode) {
-		case IWINFO_HTMODE_HT20:
-			htmode_str = "HT20";
-			hwmode_str = "n";
-			break;
-		case IWINFO_HTMODE_HT40:
-			htmode_str = "HT40";
-			hwmode_str = "n";
-			break;
-		case IWINFO_HTMODE_VHT80:
-			htmode_str = "VHT80";
-			hwmode_str = "ac";
-			break;
-		case IWINFO_HTMODE_VHT80_80:
-			htmode_str = "VHT80+80";
-			hwmode_str = "ac";
-			break;
-		case IWINFO_HTMODE_VHT160:
-			htmode_str = "VHT160";
-			hwmode_str = "ac";
-			break;
-		case IWINFO_HTMODE_NOHT:
-			htmode_str = "20";
-			hwmode_str = "a/g";
-			break;
-		default:
-			htmode_str = hwmode_str = "unknown";
-			break;
-	}
-	blobmsg_add_string(&buf, "hwmode", hwmode_str);
-	blobmsg_add_string(&buf, "htmode", htmode_str);
-}
-
 static void
 rpc_iwinfo_call_str(const char *name, int (*func)(const char *, char *))
 {
@@ -382,8 +340,6 @@ rpc_iwinfo_info(struct ubus_context *ctx, struct ubus_object *obj,
 	rpc_iwinfo_call_encryption("encryption");
 	rpc_iwinfo_call_htmodes("htmodes");
 	rpc_iwinfo_call_hwmodes("hwmodes");
-
-	rpc_iwinfo_call_hw_ht_mode();
 
 	c = blobmsg_open_table(&buf, "hardware");
 	rpc_iwinfo_call_hardware_id("id");
@@ -456,26 +412,6 @@ rpc_iwinfo_scan(struct ubus_context *ctx, struct ubus_object *obj,
 	return UBUS_STATUS_OK;
 }
 
-static void
-rpc_iwinfo_add_rateinfo(struct iwinfo_rate_entry *r)
-{
-	blobmsg_add_u8(&buf, "ht", r->is_ht);
-	blobmsg_add_u8(&buf, "vht", r->is_vht);
-	blobmsg_add_u32(&buf, "mhz", r->mhz);
-	blobmsg_add_u32(&buf, "rate", r->rate);
-
-	if (r->is_ht) {
-		blobmsg_add_u32(&buf, "mcs", r->mcs);
-		blobmsg_add_u8(&buf, "40mhz", r->is_40mhz);
-		blobmsg_add_u8(&buf, "short_gi", r->is_short_gi);
-	}
-	else if (r->is_vht) {
-		blobmsg_add_u32(&buf, "mcs", r->mcs);
-		blobmsg_add_u32(&buf, "nss", r->nss);
-		blobmsg_add_u8(&buf, "short_gi", r->is_short_gi);
-	}
-}
-
 static int
 rpc_iwinfo_assoclist(struct ubus_context *ctx, struct ubus_object *obj,
                      struct ubus_request_data *req, const char *method,
@@ -522,38 +458,21 @@ rpc_iwinfo_assoclist(struct ubus_context *ctx, struct ubus_object *obj,
 
 			blobmsg_add_string(&buf, "mac", mac);
 			blobmsg_add_u32(&buf, "signal", a->signal);
-			blobmsg_add_u32(&buf, "signal_avg", a->signal_avg);
 			blobmsg_add_u32(&buf, "noise", a->noise);
 			blobmsg_add_u32(&buf, "inactive", a->inactive);
-			blobmsg_add_u32(&buf, "connected_time", a->connected_time);
-			blobmsg_add_u32(&buf, "thr", a->thr);
-			blobmsg_add_u8(&buf, "authorized", a->is_authorized);
-			blobmsg_add_u8(&buf, "authenticated", a->is_authenticated);
-			blobmsg_add_string(&buf, "preamble", a->is_preamble_short ? "short" : "long");
-			blobmsg_add_u8(&buf, "wme", a->is_wme);
-			blobmsg_add_u8(&buf, "mfp", a->is_mfp);
-			blobmsg_add_u8(&buf, "tdls", a->is_tdls);
-
-			blobmsg_add_u16(&buf, "mesh llid", a->llid);
-			blobmsg_add_u16(&buf, "mesh plid", a->plid);
-			blobmsg_add_string(&buf, "mesh plink", a->plink_state);
-			blobmsg_add_string(&buf, "mesh local PS", a->local_ps);
-			blobmsg_add_string(&buf, "mesh peer PS", a->peer_ps);
-			blobmsg_add_string(&buf, "mesh non-peer PS", a->nonpeer_ps);
 
 			e = blobmsg_open_table(&buf, "rx");
-			blobmsg_add_u64(&buf, "drop_misc", a->rx_drop_misc);
-			blobmsg_add_u32(&buf, "packets", a->rx_packets);
-			blobmsg_add_u32(&buf, "bytes", a->rx_bytes);
-			rpc_iwinfo_add_rateinfo(&a->rx_rate);
+			blobmsg_add_u32(&buf, "rate", a->rx_rate.rate);
+			blobmsg_add_u32(&buf, "mcs", a->rx_rate.mcs);
+			blobmsg_add_u8(&buf, "40mhz", a->rx_rate.is_40mhz);
+			blobmsg_add_u8(&buf, "short_gi", a->rx_rate.is_short_gi);
 			blobmsg_close_table(&buf, e);
 
 			e = blobmsg_open_table(&buf, "tx");
-			blobmsg_add_u32(&buf, "failed", a->tx_failed);
-			blobmsg_add_u32(&buf, "retries", a->tx_retries);
-			blobmsg_add_u32(&buf, "packets", a->tx_packets);
-			blobmsg_add_u32(&buf, "bytes", a->tx_bytes);
-			rpc_iwinfo_add_rateinfo(&a->tx_rate);
+			blobmsg_add_u32(&buf, "rate", a->tx_rate.rate);
+			blobmsg_add_u32(&buf, "mcs", a->tx_rate.mcs);
+			blobmsg_add_u8(&buf, "40mhz", a->tx_rate.is_40mhz);
+			blobmsg_add_u8(&buf, "short_gi", a->tx_rate.is_short_gi);
 			blobmsg_close_table(&buf, e);
 
 			found = true;
@@ -573,45 +492,6 @@ rpc_iwinfo_assoclist(struct ubus_context *ctx, struct ubus_object *obj,
 
 	rpc_iwinfo_close();
 
-	return UBUS_STATUS_OK;
-}
-
-static int
-rpc_iwinfo_survey(struct ubus_context *ctx, struct ubus_object *obj,
-                    struct ubus_request_data *req, const char *method,
-                    struct blob_attr *msg)
-{
-	char res[IWINFO_BUFSIZE];
-	struct iwinfo_survey_entry *e;
-	void *c, *d;
-	int i, rv, len;
-
-	blob_buf_init(&buf, 0);
-
-	rv = rpc_iwinfo_open(msg);
-
-	c = blobmsg_open_array(&buf, "results");
-
-	if (rv || iw->survey(ifname, res, &len) || len < 0)
-		return UBUS_STATUS_OK;
-
-	for (i = 0; i < len; i += sizeof(struct iwinfo_survey_entry)) {
-		e = (struct iwinfo_survey_entry *)&res[i];
-
-		d = blobmsg_open_table(&buf, NULL);
-		blobmsg_add_u32(&buf, "mhz", e->mhz);
-		blobmsg_add_u32(&buf, "noise", e->noise);
-		blobmsg_add_u64(&buf, "active_time", e->active_time);
-		blobmsg_add_u64(&buf, "busy_time", e->busy_time);
-		blobmsg_add_u64(&buf, "busy_time_ext", e->busy_time_ext);
-		blobmsg_add_u64(&buf, "rx_time", e->rxtime);
-		blobmsg_add_u64(&buf, "tx_time", e->txtime);
-		blobmsg_close_table(&buf, d);
-	}
-
-	blobmsg_close_array(&buf, c);
-	ubus_send_reply(ctx, req, buf.head);
-	rpc_iwinfo_close();
 	return UBUS_STATUS_OK;
 }
 
@@ -895,7 +775,6 @@ rpc_iwinfo_api_init(const struct rpc_daemon_ops *o, struct ubus_context *ctx)
 		UBUS_METHOD("freqlist",    rpc_iwinfo_freqlist,    rpc_device_policy),
 		UBUS_METHOD("txpowerlist", rpc_iwinfo_txpowerlist, rpc_device_policy),
 		UBUS_METHOD("countrylist", rpc_iwinfo_countrylist, rpc_device_policy),
-		UBUS_METHOD("survey",      rpc_iwinfo_survey,      rpc_device_policy),
 		UBUS_METHOD("phyname",     rpc_iwinfo_phyname,     rpc_uci_policy),
 	};
 
